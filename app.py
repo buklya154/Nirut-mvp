@@ -74,6 +74,22 @@ def init_db():
     conn.close()
 
 
+@app.errorhandler(Exception)
+def handle_unexpected_error(e):
+    """Safety net: never let an unexpected crash fall through to Flask's
+    default HTML error page. The frontend always expects JSON back — an
+    HTML page in its place used to surface as a cryptic browser error
+    ("The string did not match the expected pattern.") instead of a real
+    message. This guarantees a JSON response either way, and Render's
+    logs still get the full traceback for debugging.
+    """
+    from werkzeug.exceptions import HTTPException
+    if isinstance(e, HTTPException):
+        return e
+    app.logger.exception("Unhandled error in %s", request.path)
+    return jsonify({"error": "unexpected server error", "details": str(e)}), 500
+
+
 @app.route("/")
 def index():
     return render_template("index.html", engines_available=engines.available_engines())
