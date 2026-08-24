@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>נראות — בודקים אם ה-AI ממליץ עליך</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Frank+Ruhl+Libre:wght@500;700;900&family=Heebo:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<header class="hero">
+  <div class="wrap">
+    <div class="wordmark">נראות<span class="dot">.</span></div>
+    <h1>כשלקוח שואל AI "מי מומלץ ב[עיר שלך]" — אתה מופיע?</h1>
+    <p class="sub">45% מהצרכנים כבר שואלים ChatGPT ודומיו לפני שהם מתקשרים לעסק מקומי.
+      נריץ עכשיו את השאלות האמיתיות שהלקוחות שלך שואלים, ונראה לך בדיוק איפה אתה עומד — בחינם.</p>
+  </div>
+</header>
+
+<main class="wrap">
+  {% if not engines_available %}
+  <div class="banner banner-warn">
+    השרת הזה עוד לא מחובר למנוע AI אמיתי (חסר מפתח API). זו גרסת MVP —
+    ראה/י את קובץ README.md להוראות הפעלה. הטופס למטה יעבוד ברגע שיוגדר מפתח אחד לפחות.
+  </div>
+  {% endif %}
+
+  <section class="card form-card">
+    <h2>בדיקת נראות חינמית</h2>
+    <form id="audit-form">
+      <div class="grid2">
+        <label>שם העסק (בדיוק כפי שהוא מוכר)
+          <input type="text" name="business_name" required placeholder="לדוגמה: שיפוצי דורון">
+        </label>
+        <label>עיר
+          <input type="text" name="city" required placeholder="לדוגמה: נתניה">
+        </label>
+      </div>
+
+      <label>תחום
+        <select name="category" id="category-select">
+          <option value="renovation">קבלן שיפוצים</option>
+          <option value="dentist">רופא שיניים</option>
+          <option value="lawyer">עורך דין</option>
+          <option value="restaurant">מסעדה</option>
+          <option value="real_estate">נדל"ן</option>
+          <option value="generic">אחר (הקלד/י תחום)</option>
+        </select>
+      </label>
+      <label id="custom-category-wrap" style="display:none">
+        איזה תחום?
+        <input type="text" name="custom_category_label" placeholder="לדוגמה: מספרה, וטרינר, מאמן כושר">
+      </label>
+
+      <label>עד 3 מתחרים ידועים (לא חובה, אבל משפר את הדוח)
+        <div class="grid3">
+          <input type="text" name="competitor_1" placeholder="מתחרה 1">
+          <input type="text" name="competitor_2" placeholder="מתחרה 2">
+          <input type="text" name="competitor_3" placeholder="מתחרה 3">
+        </div>
+      </label>
+
+      <details class="advanced">
+        <summary>נתונים נוספים (לא חובה — משפרים את דיוק הציון)</summary>
+        <div class="grid2">
+          <label>מספר ביקורות בגוגל
+            <input type="number" name="review_count" min="0" placeholder="לדוגמה: 12">
+          </label>
+          <label>דירוג ממוצע בגוגל
+            <input type="number" name="review_rating" min="0" max="5" step="0.1" placeholder="לדוגמה: 4.3">
+          </label>
+        </div>
+      </details>
+
+      <label>אימייל לקבלת הדוח (לא חובה, לא נשלח ספאם)
+        <input type="email" name="contact_email" placeholder="you@example.com">
+      </label>
+
+      <button type="submit" id="submit-btn">בדוק/י אותי עכשיו</button>
+      <p class="fine-print">מריצים כמה גרסאות של כל שאלה כדי לקבל תוצאה אמינה — זה לוקח כ-20-40 שניות.</p>
+    </form>
+  </section>
+
+  <section class="card result-card" id="result-card" hidden>
+    <h2 id="result-title"></h2>
+    <div class="score-block">
+      <div class="score-number" id="score-number">—</div>
+      <div class="score-label">ציון נראות מתוך 100</div>
+    </div>
+    <div class="metrics-grid" id="metrics-grid"></div>
+    <div id="competitor-block"></div>
+    <div id="runs-block"></div>
+    <div class="disclaimer">
+      הציון הזה מודד כמה פעמים AI הזכיר אתכם מול השאלות שבדקנו — הוא לא דירוג גוגל ולא הבטחה לתוצאה עתידית,
+      והוא ישתנה ככל שהמודלים עצמם משתנים. אנחנו משווים אתכם למתחרים שציינתם, באותה שיטה, כדי שההשוואה תישאר הוגנת.
+    </div>
+  </section>
+
+  <section class="card" id="error-card" hidden>
+    <p id="error-text"></p>
+  </section>
+</main>
+
+<footer class="wrap">
+  <p>נראות — MVP. נבנה עם Claude Code.</p>
+</footer>
+
+<script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>
