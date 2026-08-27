@@ -40,13 +40,20 @@ def _normalize(name: str) -> str:
 
 
 def analyze_response(business_name: str, competitor_names: List[str],
-                      text: str, recommendation_markers: List[str]) -> dict:
+                      text: str, recommendation_markers: List[str],
+                      business_name_aliases: List[str] = None) -> dict:
     """Decide whether `text` mentions the business, whether that mention
     reads as a recommendation, and which named competitors also appear.
 
     Heuristics (documented, not hidden):
     - "mentioned": the business name (case/whitespace-insensitive) appears
-      anywhere in the response text.
+      anywhere in the response text — OR any of `business_name_aliases`
+      does. Aliases exist because a real, live test found a real business
+      (a Georgian restaurant, "Batumi") whose owner might type the Latin
+      spelling while a Hebrew-language AI answer names it in Hebrew script
+      ("באטומי") — an exact-substring match against only the primary
+      spelling would silently miss a real mention. Callers should pass in
+      known alternate spellings/transliterations when available.
     - "recommended": the mention either falls in the first 150 characters
       of the response (i.e. it's a headline answer, not a footnote) OR
       appears within 40 characters of a recommendation marker word.
@@ -55,15 +62,27 @@ def analyze_response(business_name: str, competitor_names: List[str],
     """
     norm_text = text.casefold()
     norm_name = _normalize(business_name)
+    all_names = [norm_name] + [_normalize(a) for a in (business_name_aliases or []) if a and a.strip()]
 
-    mentioned = norm_name in norm_text
+    mentioned = False
+    idx = -1
+    matched_len = len(norm_name)
+    for name in all_names:
+        if not name:
+            continue
+        found_idx = norm_text.find(name)
+        if found_idx != -1:
+            mentioned = True
+            idx = found_idx
+            matched_len = len(name)
+            break  # first alias that hits is enough to score "mentioned"
+
     recommended = False
     if mentioned:
-        idx = norm_text.find(norm_name)
         if idx != -1 and idx < 150:
             recommended = True
         if not recommended:
-            window = norm_text[max(0, idx - 40): idx + len(norm_name) + 40]
+            window = norm_text[max(0, idx - 40): idx + matched_len + 40]
             if any(_normalize(m) in window for m in recommendation_markers):
                 recommended = True
 
@@ -160,12 +179,23 @@ def summarize(results: List[RunResult], review_count: Optional[int] = None,
             "stability": round(10 / 65 * 100, 2),
         }
 
+    # Stability is only meaningful in proportion to how often the business
+    # actually shows up. Without this, "never mentioned, in 12 out of 12
+    # identical zero results" reads as PERFECTLY stable (variance of an
+    # all-zero list is 0) and used to hand a truly invisible business
+    # ~15/100 instead of near-0 — which looks like a scoring bug to anyone
+    # who runs that exact case (and did, more than once). Scaling by
+    # mention_rate fixes the zero-case without changing anything for a
+    # business that's consistently mentioned (mention_rate=1 leaves the
+    # stability term untouched). `stability` itself is still reported raw
+    # in the API response, since "how consistent are you WHEN you show up"
+    # is a legitimate thing to show separately.
     score = (
         mention_rate * weights["mention"]
         + recommendation_rate * weights["recommendation"]
         + (reputation_signal or 0) * weights["reputation"]
         + (information_consistency or 0) * weights["consistency"]
-        + stability * weights["stability"]
+        + (stability * mention_rate) * weights["stability"]
     )
 
     return AuditSummary(

@@ -40,6 +40,9 @@ turns this from a single-engine check into the real multi-engine audit
 the product is supposed to be — the code already supports all four, it
 just skips whichever ones aren't configured. Do this once you have a
 few real customers and want to raise the price/credibility, not before.
+Only `call_anthropic` has been tested against a real key so far — test
+`call_openai`/`call_gemini`/`call_perplexity` for real as soon as you add
+their keys (see the model-currency note at the top of `engines.py`).
 
 **Not yet built (be honest with early customers about this):**
 - Payments (Stripe or similar) — right now every audit is free. The
@@ -83,8 +86,17 @@ Recommended path (checked Aug 2026):
 
 - **Start here, free: Render.com.** Connect this folder as a Git repo
   (or use the dashboard's manual deploy), set the start command to
-  `gunicorn app:app`, add your API key(s) as environment variables.
-  No credit card needed. The one catch: the free instance sleeps after
+  `gunicorn app:app --timeout 120`, add your API key(s) as environment
+  variables. No credit card needed.
+  **Important: use `--timeout 120`, not just `gunicorn app:app`.**
+  Gunicorn kills any request that runs longer than 30 seconds by
+  default — but a real audit (several AI calls in a row) routinely
+  takes 20-40+ seconds, especially on a free/shared instance. Without
+  the longer timeout, gunicorn can kill the request *after* the AI
+  calls already ran (and got billed) but *before* it can send back the
+  answer — which shows up to the user as a confusing browser error
+  instead of a real result.
+  The other catch: the free instance sleeps after
   15 minutes of inactivity and takes ~1 minute to wake up on the next
   request — fine for sending self-serve links (Arm A of the field
   test), but open the link yourself 2 minutes before any live,
@@ -131,10 +143,25 @@ Request body (JSON):
   "category": "renovation",                // renovation|dentist|lawyer|restaurant|real_estate|generic
   "custom_category_label": "מספרה",       // required only if category="generic"
   "competitors": ["מתחרה א", "מתחרה ב"],  // optional, up to 3
+  "business_name_aliases": ["Batumi"],     // optional, up to 3 - alternate
+                                            // spellings/transliterations of
+                                            // the business name (e.g. the
+                                            // Latin spelling of a Hebrew-
+                                            // script name) so a real mention
+                                            // isn't missed on an exact-text match
   "contact_email": "you@example.com",      // optional
-  "runs_per_prompt": 3                     // optional, default 3, max 5
+  "runs_per_prompt": 3,                    // optional, default 3, max 5
+  "grounded": false                        // optional, default false - see
+                                            // "Grounded (web-search) mode" below
 }
 ```
+
+**Rate limit:** `POST /api/audit` is limited per visitor (default 5 per
+hour, tune with `NIRUT_RATE_LIMIT`) and capped server-wide at
+`NIRUT_MAX_AUDITS_PER_DAY` (default 50) total audits per day — both exist
+because every audit is several real, billed LLM calls. A visitor over
+the per-IP limit gets a `429`; the server-wide cap also returns `429`
+with a Hebrew message. Raise both once real usage/pricing justifies it.
 
 Success response (200):
 ```json
@@ -160,20 +187,52 @@ Success response (200):
 
 Error responses: `400` (missing business_name/city, or an unknown
 category), `503` (no API key configured on the server yet), `502` (every
-engine call failed — show a retry message, not a 0 score).
+engine call failed — show a retry message, not a 0 score), `429` (rate
+limit or daily cap hit — Hebrew message, JSON body, safe to retry
+later), `500` (unexpected server error — also always JSON, never an HTML
+page, so the frontend can rely on `.json()` working on every response
+this API ever returns).
 
 **CORS is already handled** (`flask-cors` is in `requirements.txt`, wired
 in `app.py`). Once you know your Lovable project's URL, set
 `NIRUT_ALLOWED_ORIGIN` to it in your host's environment variables instead
 of leaving it open to any origin.
 
+## Grounded (web-search) mode
+
+By default, every audit answers from the model's training data alone -
+that measures what the model already "knows" about a business, not what
+a real ChatGPT/Claude/Gemini user sees today, since real answers for
+local businesses lean on live web/business-data lookups. Pass
+`"grounded": true` in the `/api/audit` request body to turn on each
+engine's live web-search tool instead (Anthropic web search, OpenAI web
+search, Gemini Google Search grounding) - the response's `"grounded"`
+field always echoes back which mode actually ran.
+
+**This costs more per audit — keep it opt-in, don't flip the default.**
+Web search is billed per search/query on top of normal token cost
+(roughly $10-35 per 1,000 searches depending on provider). A full audit
+makes `prompts × engines × runs_per_prompt` calls; see the cost comment
+at the top of `engines.py` for the exact math and the search-count cap
+that keeps a single grounded audit well under $1. Perplexity's `sonar`
+is always web-grounded regardless of this flag - there's no ungrounded
+mode for it to opt out of.
+
 ## Where the data goes
 
-Every audit run gets logged to a local SQLite file (`nirut.db`) —
-business name, city, category, score, and the email if they gave one.
-This is the entire CRM for now, same philosophy as the original plan's
-Google Sheet, just automatic instead of hand-typed. Open it with any
-SQLite browser, or `sqlite3 nirut.db "select * from audits;"`.
+Every audit run gets logged — business name, city, category, score, and
+the email if they gave one. This is the entire CRM for now, same
+philosophy as the original plan's Google Sheet, just automatic instead
+of hand-typed.
+
+By default this goes to a local SQLite file (`nirut.db`) — fine for
+local dev, but **on Render's free tier the filesystem is wiped on every
+redeploy/restart, silently losing every lead.** Set `DATABASE_URL` (a
+free Render Postgres add-on, or Supabase) to persist for real — the app
+uses it automatically when set, no code changes needed. Without SQLite,
+open the file with any SQLite browser or
+`sqlite3 nirut.db "select * from audits;"`; with Postgres, use whatever
+client the host gives you, or `psql "$DATABASE_URL" -c "select * from audits;"`.
 
 ## The honesty rules this product has to keep (carried over from the
 ## earlier research — don't relitigate these, they're load-bearing)

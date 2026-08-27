@@ -68,6 +68,49 @@ def test_summarize_with_optional_reputation_data_uses_full_weights():
     assert summary.weights_used["consistency"] == 15
 
 
+def test_summarize_never_mentioned_scores_near_zero():
+    # Regression test for a real bug found in live testing: a business
+    # that is NEVER mentioned has a perfectly stable (zero-variance) "not
+    # mentioned" result, which used to hand the stability weight in full
+    # and produce a ~15/100 headline score for a genuinely 0%-visibility
+    # business. That reads as a scoring bug to anyone who runs this exact
+    # case - stability must be scaled by mention_rate so a true zero
+    # reads as a true zero.
+    results = [
+        RunResult(engine="anthropic", prompt="p1", mentioned=False, recommended=False, competitors_mentioned=["X"]),
+        RunResult(engine="anthropic", prompt="p1", mentioned=False, recommended=False, competitors_mentioned=["X"]),
+        RunResult(engine="anthropic", prompt="p2", mentioned=False, recommended=False, competitors_mentioned=["X"]),
+        RunResult(engine="anthropic", prompt="p2", mentioned=False, recommended=False, competitors_mentioned=["X"]),
+    ]
+    summary = summarize(results)
+    assert summary.mention_rate == 0.0
+    assert summary.stability == 1.0  # still reported raw - "consistent" is true
+    assert summary.findability_score == 0.0  # but must not leak into the headline score
+
+
+def test_summarize_always_mentioned_unaffected_by_stability_fix():
+    # A business that's consistently mentioned should score the same as
+    # before the fix - the mention_rate=1 case leaves stability's
+    # contribution untouched.
+    results = [
+        RunResult(engine="anthropic", prompt="p1", mentioned=True, recommended=True, competitors_mentioned=[]),
+        RunResult(engine="anthropic", prompt="p1", mentioned=True, recommended=True, competitors_mentioned=[]),
+    ]
+    summary = summarize(results)
+    assert summary.mention_rate == 1.0
+    assert summary.stability == 1.0
+    assert summary.findability_score == 100.0
+
+
+def test_analyze_response_matches_alias_when_primary_spelling_absent():
+    # Real case from live testing: "Batumi" (Latin) typed by the owner,
+    # but the Hebrew AI answer names it "באטומי" - only matches via alias.
+    text = "מסעדה מומלצת בנתניה היא באטומי, מסעדה גאורגית ידועה."
+    result = analyze_response("Batumi", [], text, RECOMMENDATION_MARKERS,
+                               business_name_aliases=["באטומי"])
+    assert result["mentioned"] is True
+
+
 def test_summarize_empty_raises():
     try:
         summarize([])
