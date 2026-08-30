@@ -17,6 +17,7 @@ from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 
 import engines
+import judge
 import scoring
 from prompts import get_prompts, RECOMMENDATION_MARKERS
 
@@ -267,14 +268,39 @@ def api_audit():
         engine_name, prompt = job
         try:
             text = engines.run_prompt(engine_name, prompt, grounded=grounded)
+            # Keep the regex analysis: it produces the fallback AND the
+            # manual-competitor matching, neither of which the judge replaces.
             analysis = scoring.analyze_response(
                 business_name, competitors, text, RECOMMENDATION_MARKERS,
                 business_name_aliases=business_name_aliases,
             )
+            jr = judge.judge_response(text, business_name, business_name_aliases,
+                                      custom_category_label or category, city)
+            if jr.ok:
+                # `mentioned` is OR-ed, not replaced: the substring/alias match
+                # is high-precision and free, the judge is high-recall (catches
+                # inflections and spellings the substring misses). OR-ing raises
+                # recall while keeping a deterministic floor — the judge alone
+                # can never REMOVE a mention the substring found, which is the
+                # guard against a judge false-negative silently zeroing a real
+                # business's score.
+                mentioned = analysis["mentioned"] or jr.status != "absent"
+                # `recommended` comes purely from the judge — it is the broken
+                # thing this whole change exists to fix.
+                recommended = jr.status == "top_pick"
+                status = jr.status if (jr.status != "absent" or not analysis["mentioned"]) else "listed"
+            else:
+                mentioned = analysis["mentioned"]
+                recommended = analysis["recommended"]
+                status = "top_pick" if recommended else ("listed" if mentioned else "absent")
+
             return scoring.RunResult(
                 engine=engine_name, prompt=prompt,
-                mentioned=analysis["mentioned"], recommended=analysis["recommended"],
+                mentioned=mentioned, recommended=recommended,
                 competitors_mentioned=analysis["competitors_mentioned"], raw_text=text,
+                status=status, matched_as=jr.matched_as if jr.ok else None,
+                businesses_named=jr.businesses_named if jr.ok else [],
+                judged=jr.ok,
             )
         except engines.EngineError as e:
             return {"error": str(e), "engine": engine_name, "prompt": prompt}
@@ -297,6 +323,7 @@ def api_audit():
         review_rating=float(review_rating) if review_rating not in (None, "") else None,
         directories_checked=int(directories_checked) if directories_checked not in (None, "") else None,
         directories_consistent=int(directories_consistent) if directories_consistent not in (None, "") else None,
+        manual_competitors=competitors,
     )
 
     # Log the run - this is the product's entire CRM for the MVP stage.
@@ -323,6 +350,11 @@ def api_audit():
             "engine": r.engine, "prompt": r.prompt, "mentioned": r.mentioned,
             "recommended": r.recommended, "competitors_mentioned": r.competitors_mentioned,
             "excerpt": (r.raw_text[:220] + "…") if len(r.raw_text) > 220 else r.raw_text,
+            # `matched_as` is the receipt: the exact substring that named the
+            # business, so the UI can highlight it and any single data point
+            # can be defended to a skeptical agency.
+            "status": r.status, "matched_as": r.matched_as,
+            "businesses_named": r.businesses_named, "judged": r.judged,
         }
         for r in results
     ]
@@ -343,6 +375,12 @@ def api_audit():
             "information_consistency": summary.information_consistency,
             "weights_used": summary.weights_used,
             "total_runs": summary.total_runs,
+            # Judge-derived (judge.py). share_of_voice above may be null —
+            # that means "not measured", and the UI must not render it as 100%.
+            "top_pick_rate": summary.top_pick_rate,
+            "listed_rate": summary.listed_rate,
+            "judge_coverage": summary.judge_coverage,
+            "named_competitor_counts": summary.named_competitor_counts,
         },
         "runs": example_runs,
         "errors": errors,

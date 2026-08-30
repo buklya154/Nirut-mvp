@@ -1,0 +1,36 @@
+{
+  "_comment": "SYNTHETIC fixtures - hand-written to reproduce the answer shapes that break the regex detector. NOT captured model output, NOT ground truth. See README.md in this directory.",
+  "fixtures": [
+    {
+      "name": "list_format_under_recommended_heading",
+      "why": "The case the regex misses. A hedging preamble consumes the first 150 chars, so the headline rule cannot fire. The governing verb (מומלצות) sits above the list, while the +/-40 char window around the business name contains only the category header (מטבח ים תיכוני).",
+      "business_name": "אאוצ'ד",
+      "aliases": ["OCD"],
+      "city": "תל אביב",
+      "category_label": "מסעדה",
+      "expected_status": "top_pick",
+      "expected_regex_recommended": false,
+      "text": "קשה לקבוע איזו מסעדה היא 'הכי טובה' באופן אובייקטיבי, כי זה תלוי מאוד בטעם אישי, בתקציב ובסוג החוויה שאתם מחפשים. עם זאת, הנה כמה מסעדות בתל אביב שנחשבות לטובות ומומלצות מאוד על ידי סועדים ומבקרי מסעדות:\n\n**מטבח ים תיכוני —**\n- הרברט סמואל — נוף לים ומטבח ים תיכוני מוקפד\n- אאוצ'ד (OCD) — שף אסף גרניט, תפריט טעימות\n\n**מטבח אסייתי —**\n- אוזה — יפני עכשווי\n- הצמרת — פיוז'ן אסייתי\n\nמומלץ להזמין מקום מראש בכל המסעדות האלה."
+    },
+    {
+      "name": "similar_name_different_business",
+      "why": "A different business whose name nearly matches. Substring matching would call this present; the correct answer is absent.",
+      "business_name": "אאוצ'ד",
+      "aliases": ["OCD"],
+      "city": "תל אביב",
+      "category_label": "מסעדה",
+      "expected_status": "absent",
+      "text": "בתל אביב יש מגוון רחב של מסעדות. אחת האפשרויות הפופולריות היא מסעדת אאוצ'דו בר, מקום קטן ברחוב אלנבי שמתמחה בקפה ומאפים. מעבר לזה כדאי לשקול את הרברט סמואל או את אוזה."
+    },
+    {
+      "name": "neutral_aside_mention",
+      "why": "Named, but only as a neutral aside inside a list the answer does not frame as recommended.",
+      "business_name": "אאוצ'ד",
+      "aliases": ["OCD"],
+      "city": "תל אביב",
+      "category_label": "מסעדה",
+      "expected_status": "listed",
+      "text": "בתל אביב פועלות מאות מסעדות בכל קטגוריה. בין המסעדות שנפתחו בשנים האחרונות אפשר למנות את אאוצ'ד, וכן מקומות נוספים כמו קפה נורדוי ובר אלנבי. כדי לבחור, שווה לבדוק ביקורות עדכניות."
+    }
+  ]
+}

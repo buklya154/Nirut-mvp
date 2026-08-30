@@ -172,13 +172,21 @@ Success response (200):
     "mention_rate": 0.11,
     "recommendation_rate": 0.0,
     "stability": 0.8,
-    "share_of_voice": 0.05,
+    "share_of_voice": 0.05,           // may be null - see "share_of_voice can now be null"
     "competitor_mention_rates": {"מתחרה א": 0.82, "מתחרה ב": 0.64},
+    "top_pick_rate": 0.08,            // judge: presented as a recommendation
+    "listed_rate": 0.34,              // judge: named, but neutrally
+    "judge_coverage": 1.0,            // fraction of answers the judge analysed
+    "named_competitor_counts": {"הרברט סמואל": 7, "אוזה": 5},
     "total_runs": 27
   },
   "runs": [
     {"engine": "anthropic", "prompt": "...", "mentioned": false,
      "recommended": false, "competitors_mentioned": ["מתחרה א"],
+     "status": "absent",              // top_pick | listed | absent
+     "matched_as": null,              // exact substring naming the business
+     "businesses_named": ["אוזה"],
+     "judged": true,                  // false => scored by the text fallback
      "excerpt": "the first ~220 characters of the real AI answer..."}
   ],
   "errors": []
@@ -197,6 +205,48 @@ this API ever returns).
 in `app.py`). Once you know your Lovable project's URL, set
 `NIRUT_ALLOWED_ORIGIN` to it in your host's environment variables instead
 of leaving it open to any origin.
+
+## How "recommended" is decided (the LLM judge)
+
+Whether an answer *recommends* the business — as opposed to merely naming it
+— is decided by a second, cheap model call per answer (`judge.py`), not by
+text pattern-matching. It returns three states instead of a boolean:
+
+- `top_pick` — presented as a recommendation (best / recommended / singled
+  out positively / in a list the answer frames as recommended)
+- `listed` — named neutrally, an example or an aside
+- `absent` — not named at all
+
+It also returns `matched_as` (the exact substring that named the business, so
+the report can show its receipts) and `businesses_named` (every *other* real
+business in the answer — this is where `named_competitor_counts` and the
+"who the AI does recommend" line come from, with zero typing from the
+customer).
+
+The old text-matching path is still there and is still load-bearing: if the
+judge call fails or is disabled, the run is scored exactly as it was before.
+`judge_coverage` in the response reports what fraction of answers the judge
+actually analysed, so the report can state its own methodology
+("12 מתוך 12 תשובות נותחו") rather than hide it.
+
+| Env var | Default | What it does |
+|---|---|---|
+| `NIRUT_JUDGE_ENABLED` | `1` | Set to `0` to turn the judge off entirely and fall back to text matching everywhere. |
+| `NIRUT_JUDGE_MODEL` | `claude-haiku-4-5` | The judging model. Cheapest Haiku-class model; verified current 2026-08-30. |
+| `NIRUT_JUDGE_TIMEOUT` | `20` | Per-call timeout in seconds. |
+
+**Cost:** about **$0.011 per 12-run audit** (~7,200 input + 720 output tokens
+at Haiku's $1.00/$5.00 per 1M). Roughly a cent — negligible next to the
+engine calls already being billed. `NIRUT_MAX_AUDITS_PER_DAY` already caps
+total spend.
+
+### share_of_voice can now be `null`
+
+If no competitors were supplied *and* the judge named none, `share_of_voice`
+is `null`, meaning "not measured" — **the UI must render that as
+"לא נבדק — לא זוהו מתחרים", never as 100%.** It previously returned `1.0`
+whenever the business was mentioned even once, which put a green
+"נתח קול 100%" tile next to a failing score.
 
 ## Grounded (web-search) mode
 

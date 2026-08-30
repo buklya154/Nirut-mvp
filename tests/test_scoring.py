@@ -125,6 +125,73 @@ def test_get_prompts_renovation():
     assert all("נתניה" in p for p in prompts)
 
 
+def test_summarize_judge_rates_from_mixed_statuses():
+    results = [
+        RunResult(engine="anthropic", prompt="p1", mentioned=True, recommended=True,
+                  status="top_pick", judged=True),
+        RunResult(engine="anthropic", prompt="p1", mentioned=True, recommended=False,
+                  status="listed", judged=True),
+        RunResult(engine="anthropic", prompt="p2", mentioned=False, recommended=False,
+                  status="absent", judged=True),
+        # judge failed on this one -> scored by the regex fallback
+        RunResult(engine="anthropic", prompt="p2", mentioned=False, recommended=False,
+                  status="absent", judged=False),
+    ]
+    summary = summarize(results)
+    assert summary.top_pick_rate == 0.25
+    assert summary.listed_rate == 0.25
+    assert summary.judge_coverage == 0.75
+
+
+def test_summarize_share_of_voice_is_none_when_no_competitors_at_all():
+    # Must NOT be 1.0: a green "100% share of voice" tile next to a failing
+    # score is the inconsistency that gets the whole report dismissed.
+    results = [
+        RunResult(engine="anthropic", prompt="p1", mentioned=True, recommended=True,
+                  status="top_pick", judged=True),
+    ]
+    summary = summarize(results)
+    assert summary.share_of_voice is None
+    assert summary.named_competitor_counts == {}
+
+
+def test_summarize_share_of_voice_from_judge_named_businesses():
+    # No manual competitors, but the judge named real ones: 2 business
+    # mentions vs 3 competitor mentions -> 2/5.
+    results = [
+        RunResult(engine="anthropic", prompt="p1", mentioned=True, recommended=True,
+                  status="top_pick", judged=True,
+                  businesses_named=["הרברט סמואל", "אוזה"]),
+        RunResult(engine="anthropic", prompt="p2", mentioned=True, recommended=False,
+                  status="listed", judged=True,
+                  businesses_named=["הרברט סמואל"]),
+    ]
+    summary = summarize(results)
+    assert summary.named_competitor_counts == {"הרברט סמואל": 2, "אוזה": 1}
+    assert summary.share_of_voice == 0.4
+
+
+def test_summarize_manual_competitors_keep_old_share_of_voice_behaviour():
+    # Owner named a rival that never showed up -> genuinely 100% of that
+    # comparison, and that stays 1.0 rather than becoming None.
+    results = [
+        RunResult(engine="anthropic", prompt="p1", mentioned=True, recommended=True,
+                  status="top_pick", judged=True),
+    ]
+    summary = summarize(results, manual_competitors=["מתחרה א"])
+    assert summary.share_of_voice == 1.0
+
+
+def test_summarize_named_competitor_counts_capped_at_ten():
+    results = [
+        RunResult(engine="anthropic", prompt="p1", mentioned=False, recommended=False,
+                  status="absent", judged=True,
+                  businesses_named=["מסעדה %d" % i for i in range(25)]),
+    ]
+    summary = summarize(results)
+    assert len(summary.named_competitor_counts) == 10
+
+
 def test_get_prompts_generic_requires_label():
     # Without a custom label, generic templates that need {category} are skipped.
     prompts = get_prompts("generic", "נתניה")

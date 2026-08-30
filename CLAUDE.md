@@ -46,10 +46,16 @@ to build it.
   tested. This is the part that must stay provably correct; any change
   here needs a matching test in `tests/test_scoring.py`.
 - `prompts.py` — Hebrew buyer-intent prompt templates by category.
-- `tests/` — `test_scoring.py` (scoring math, no network), `test_engines.py`
-  (grounded-flag plumbing and retry logic, fakes out the engine functions
-  — no network), `test_app.py` (the `/api/audit` route, monkeypatches
-  `engines.run_prompt` — no network, no real DB file left behind).
+- `judge.py` — the LLM judge that decides `top_pick`/`listed`/`absent` and
+  extracts competitor names. Owns the ONLY network call outside `engines.py`;
+  `_call_judge_model` is a deliberate one-function test seam.
+- `tools/` — `capture_audit.py` (runs a real audit and dumps its raw answers
+  into a file for hand-labelling; costs money) and `eval_judge.py` (scores
+  the text fallback and the judge against those hand labels).
+- `tests/` — `test_scoring.py` (scoring math), `test_engines.py` (grounded
+  flag + retries), `test_judge.py` (judge parsing/coercion/failure modes),
+  `test_app.py` (the `/api/audit` route). **No test hits the network**, and
+  none leaves a DB file behind.
 
 ## Grounded (web-search) mode
 
@@ -120,6 +126,30 @@ flag; there's no ungrounded mode for it to opt out of.
   `call_anthropic` has been tested against a real key; re-verify the
   others' model IDs against provider docs before trusting them, same as
   before.
+- **"Recommended" comes from the judge, not the regex (P1/P2 — done
+  2026-08-30).** `judge.py` decides `top_pick`/`listed`/`absent` per answer.
+  The regex path in `scoring.analyze_response()` and `RECOMMENDATION_MARKERS`
+  are the FALLBACK and are load-bearing — do not delete them. Three things
+  worth knowing before touching this:
+  - `mentioned` is OR-ed (`regex OR judge`), so the judge can never remove a
+    mention the substring found. The cost of that guard: a substring
+    **false positive** survives — `אאוצ'ד` matches inside the different
+    business `אאוצ'דו בר`, and such a run is recorded as `listed`, not
+    `absent`. Pinned in `test_regex_baseline_false_positives_on_similar_name`.
+  - The score formula is UNCHANGED. `recommendation_rate` keeps its weight
+    and simply now equals `top_pick_rate`. Changing the formula is P4 and
+    needs a product decision from Timur first.
+  - `share_of_voice` can now be `None` ("not measured"). It must never render
+    as 100% when no competitors were found — that inconsistency next to a
+    failing score is what gets a report dismissed.
+- **The judge's accuracy is NOT yet measured.** SPEC-P1-judge.md §5 requires
+  a hand-labelled set (`tests/fixtures/ocd_2026-08-30.json`) and a ≥11/12
+  accuracy gate before this ships to a paying customer. That file does not
+  exist yet: it needs a live audit (real money) plus Timur's own labels.
+  The fixtures that DO exist (`hebrew_answer_shapes.json`) are synthetic and
+  are marked as such — they test plumbing, not accuracy. Do not quote an
+  accuracy number in the report or to an agency until `tools/eval_judge.py`
+  has produced one from real labels.
 - **`.gitignore` / `.env.example` exist now** — they didn't before, even
   though older docs already assumed them (referencing `.env.example` in
   setup steps, claiming `.env` was gitignored). If either goes missing
